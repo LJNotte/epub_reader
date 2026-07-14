@@ -1,0 +1,57 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: epub_reader
+      POSTGRES_USER: reader
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # PostgreSQL 仅供 Docker 内部的 backend 使用，不默认映射宿主机 5432，
+    # 以避免与本机或另一份笃笃实例的数据库端口冲突。
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reader -d epub_reader"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://reader:${DB_PASSWORD:-change-me}@db:5432/epub_reader
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+      UPLOAD_DIR: /app/books
+      TTS_CACHE_DIR: /app/tts_cache
+      # 启动器遇到端口占用时会自动选择下一可用端口；同步允许该前端来源。
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000,http://localhost:${DUDU_FRONTEND_PORT:-5173}
+    volumes:
+      - books_data:/app/books
+      - tts_cache:/app/tts_cache
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${DUDU_BACKEND_PORT:-8000}:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    environment:
+      VITE_API_BASE_URL: http://localhost:${DUDU_BACKEND_PORT:-8000}/api
+      VITE_BACKEND_PROXY_TARGET: http://backend:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    ports:
+      - "${DUDU_FRONTEND_PORT:-5173}:5173"
+
+volumes:
+  pgdata:
+  books_data:
+  tts_cache:
